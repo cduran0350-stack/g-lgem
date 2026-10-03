@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GÖLGEM - Emlak & Harita Bilgi Sistemi</title>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="mahalle_data.js"></script>
+    <style>
+        :root {
+            --primary: #1A202C;
+            --accent: #D69E2E;
+            --bg-light: #F7FAFC;
+            --text-dark: #2D3748;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: var(--bg-light); color: var(--text-dark); }
+
+        /* App Header */
+        header {
+            height: 60px;
+            background: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            position: relative;
+        }
+        .app-logo { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .app-logo img { height: 46px; mix-blend-mode: multiply; }
+        .app-logo span { font-size: 1.2rem; font-weight: 900; color: var(--primary); letter-spacing: 1px; }
+
+        .search-container { flex: 1; max-width: 320px; margin: 0 10px; }
+        .search-container input {
+            width: 100%; padding: 10px 16px; border-radius: 20px; border: 1px solid #E2E8F0;
+            outline: none; font-size: 0.9rem; background: #EDF2F7; color: var(--text-dark);
+            transition: border 0.3s;
+        }
+        .search-container input:focus { border: 1px solid var(--accent); }
+
+        /* Main Contexts */
+        #main-container { width: 100%; height: calc(100vh - 60px); position: relative; }
+        #map-view, #table-view { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        #table-view { background: #F7FAFC; z-index: 10; display: none; overflow-y: auto; padding: 15px; padding-bottom: 80px; }
+
+        /* Buttons */
+        .fab-btn {
+            position: absolute; z-index: 500; background: #FFF; border: none; padding: 12px;
+            border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.25); cursor: pointer;
+            display: flex; align-items: center; justify-content: center; transition: transform 0.2s;
+        }
+        .fab-btn:active { transform: scale(0.95); }
+        #loc-btn { bottom: 85px; right: 20px; width: 48px; height: 48px; font-size: 1.4rem; }
+        #toggle-btn {
+            position: absolute; bottom: 20px; right: 20px; z-index: 500; background: var(--primary);
+            color: #FFF; border: 2px solid var(--accent); padding: 12px 20px; border-radius: 30px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3); cursor: pointer; font-weight: 700; font-size: 0.95rem;
+        }
+
+        /* Tree Styles */
+        .district-card { background: #FFFFFF; margin-bottom: 12px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .district-header { padding: 16px 15px; font-weight: bold; background: #E2E8F0; cursor: pointer; color: var(--primary); display: flex; justify-content: space-between; font-size: 1.05rem; }
+        .neighborhood-box { padding: 10px 15px; display: none; background: #FFFFFF; }
+        .neighborhood-header { font-weight: 700; color: var(--accent); cursor: pointer; padding: 10px 0; border-bottom: 1px solid #EDF2F7; display: flex; justify-content: space-between; }
+        .projects-box { display: none; padding-left: 14px; border-left: 2px solid #EDF2F7; margin-top: 10px; }
+        .project-item {
+            background: var(--bg-light); border: 1px solid #E2E8F0; border-left: 4px solid var(--accent);
+            padding: 14px; margin: 10px 0; border-radius: 6px; cursor: pointer;
+        }
+        .project-title { font-weight: 800; font-size: 1rem; color: var(--primary); margin-bottom: 6px; }
+        .project-details { font-size: 0.85rem; color: #4A5568; line-height: 1.6; }
+
+        /* Popup Styles */
+        .popup-card { font-size: 0.9rem; line-height: 1.6; color: #2D3748; min-width: 220px; }
+        .popup-title { font-size: 1.15rem; font-weight: 800; color: var(--primary); margin-bottom: 8px; border-bottom: 2px solid var(--accent); padding-bottom: 6px; }
+        .route-links { display: flex; gap: 8px; margin-top: 15px; }
+        .route-btn { flex: 1; padding: 10px 4px; text-align: center; color: #FFF; text-decoration: none; border-radius: 6px; font-size: 0.85rem; font-weight: 700; }
+        .bg-google { background: #4285F4; } .bg-yandex { background: #E02828; } .bg-apple { background: #000000; }
+        
+        .leaflet-tooltip { font-weight: bold; border-radius: 4px; border: 1px solid var(--accent); font-size: 0.9rem; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+
+        /* Mahalle İsim Etiketi */
+        .nh-label {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            text-align: center;
+            pointer-events: none;
+        }
+        .nh-label-text {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            color: rgba(30,30,30,0.55);
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.8), -1px -1px 2px rgba(255,255,255,0.8);
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        /* Form Inputs */
+        .f-input { width: 100%; margin-bottom: 8px; padding: 6px 8px; border: 1px solid #CBD5E0; border-radius: 4px; outline: none; font-family: inherit; }
+        .f-input:focus { border-color: var(--accent); }
+
+        /* Yedekleme Barı */
+        .backup-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #EDF2F7;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .backup-bar span { font-size: 0.85rem; color: #4A5568; font-weight: 600; }
+        .backup-btn {
+            padding: 7px 16px;
+            border: none;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .backup-btn:hover { opacity: 0.85; }
+        .btn-export { background: #38A169; color: white; }
+        .btn-import { background: #3182CE; color: white; }
+
+        /* Mobil Uyumlu Tasarım */
+        @media (max-width: 650px) {
+            .app-logo span { display: none; }
+            header { padding: 0 5px; }
+            .search-container { max-width: 100%; width: 100%; margin: 0 5px; }
+            .leaflet-popup-content { width: 280px !important; margin: 8px !important; }
+            #loc-btn { bottom: 85px; right: 15px; width: 44px; height: 44px; font-size: 1.2rem; }
+            #toggle-btn { bottom: 15px; right: 15px; padding: 10px 14px; font-size: 0.9rem; }
+            .backup-bar { flex-direction: column; gap: 8px; align-items: stretch; }
+            .backup-btn { width: 100%; text-align: center; font-size:0.9rem; padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="app-logo" onclick="resetView()">
+            <img src="logo.jpg" alt="Logo">
+            <span>GÖLGEM</span>
+        </div>
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Proje veya özellik ara..." onkeyup="executeSearch(this.value)">
+        </div>
+    </header>
+
+    <div id="main-container">
+        <div id="map-view"></div>
+        <div id="table-view">
+            <h2 style="margin-bottom:12px; font-size:1.3rem; color:var(--primary); font-weight:800; text-align: center;">Kayıtlı Tüm Bölgeler</h2>
+            
+            <!-- Yedekleme ve Geri Yükleme -->
+            <div class="backup-bar">
+                <span>💾 Verilerini Yedekle:</span>
+                <button class="backup-btn btn-export" onclick="exportData()">⬇️ JSON Olarak İndir</button>
+                <button class="backup-btn btn-import" onclick="document.getElementById('importFile').click()">⬆️ Yedekten Geri Yükle</button>
+                <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+            </div>
+
+            <div id="treeContainer"></div>
+        </div>
+
+        <button id="loc-btn" class="fab-btn" onclick="locateUser()" title="Konumuma Git">📍</button>
+        <button id="toggle-btn" onclick="switchView()">📋 Tablo Görünümü</button>
+    </div>
+
+    <script>
+        // Veriler 'mahalle_data.js' dosyasından otomatik yükleniyor.
+
+        let map, activeMode = 'map';
+        let customMarkers = [];
+        let searchHighlight = null;
+        let activeMarkersGroup = L.layerGroup();
+        let _editCtx = {}; // Aktif form bilgisini tutar (dist, nh, id, lat, lng)
+        let _readCtx = {};  // Okuma popup'u için aktif proje bilgisi
+
+        // Local Storage'dan kaydedilen projeleri çek, yoksa boş dizi
+        let savedProjects = JSON.parse(localStorage.getItem('golgem_projects')) || [];
+
+        function initMap() {
+            // ──── VERİ MIGRATION (isim düzeltme) ────────────────────────────────
+            // Mahalle verisi yeniden oluşturuldu. Eski LocalStorage'da
+            // bozuk UTF-8 karakterli veya farklı formatlı isimler olabilir.
+            // Kayıtlı her projeyi veritabanındaki asıl isimle eşleştir.
+            const allNhNames = [];
+            if (typeof database !== 'undefined') {
+                database.forEach(d => d.neighborhoods.forEach(n => allNhNames.push(n.name)));
+            }
+
+            function normalize(s) {
+                return (s || '').toLowerCase()
+                    .replace(/[ğ]/g,'g').replace(/[ü]/g,'u').replace(/[ş]/g,'s')
+                    .replace(/[ı]/g,'i').replace(/[ö]/g,'o').replace(/[ç]/g,'c')
+                    .replace(/\s+mah\.?$/,'').replace(/\s+mahallesi$/i,'').trim();
+            }
+
+            let needsSave = false;
+            savedProjects.forEach(p => {
+                const normNh = normalize(p.nh);
+                // Veritabanında tam eşleşme var mı?
+                const exact = allNhNames.find(n => n === p.nh);
+                if (!exact) {
+                    // Normalize ederek bul
+                    const best = allNhNames.find(n => normalize(n) === normNh);
+                    if (best) { p.nh = best; needsSave = true; }
+                }
+            });
+            if (needsSave) localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+            // ────────────────────────────────────────────────────────────────────
+
+            const antalyaBounds = [[36.75, 30.50], [37.00, 30.95]];
+            
+            const googleStreets = L.tileLayer('https://mt0.google.com/vt/lyrs=m&hl=tr&x={x}&y={y}&z={z}', { maxNativeZoom: 22, maxZoom: 24 });
+            const googleSatellite = L.tileLayer('https://mt0.google.com/vt/lyrs=y&hl=tr&x={x}&y={y}&z={z}', { maxNativeZoom: 22, maxZoom: 24 });
+            const googleTerrain = L.tileLayer('https://mt0.google.com/vt/lyrs=p&hl=tr&x={x}&y={y}&z={z}', { maxNativeZoom: 22, maxZoom: 24 });
+
+            map = L.map('map-view', {
+                zoomSnap: 0.25,
+                maxZoom: 24,
+                minZoom: 11,
+                layers: [googleStreets]
+            }).setView([36.90, 30.70], 11);
+            
+            map.setMaxBounds(antalyaBounds);
+
+            L.control.layers({ "🏠 Sokak": googleStreets, "🌍 Uydu": googleSatellite, "⛰️ Fiziki": googleTerrain }, null, { position: 'topright' }).addTo(map);
+            activeMarkersGroup.addTo(map);
+
+            drawNeighborhoodBorders();
+            refreshMapMarkers();
+
+            setTimeout(() => { map.invalidateSize(); }, 500);
+        }
+
+        // Polygon'un kabaca merkezini bul (tüm noktaların ortalaması)
+        function getGeomCentroid(geom) {
+            let coords = [];
+            if (geom.type === 'Polygon') {
+                coords = geom.coordinates[0];
+            } else if (geom.type === 'MultiPolygon') {
+                // En büyük poligonu al
+                let biggest = geom.coordinates.reduce((a, b) => a[0].length > b[0].length ? a : b);
+                coords = biggest[0];
+            }
+            if (!coords.length) return [0, 0];
+            const sumLat = coords.reduce((s, c) => s + c[1], 0);
+            const sumLng = coords.reduce((s, c) => s + c[0], 0);
+            return [sumLat / coords.length, sumLng / coords.length];
+        }
+
+        // Mahalle Gerçek Sınırlarını Haritaya Çiz
+        function drawNeighborhoodBorders() {
+            database.forEach(dist => {
+                dist.neighborhoods.forEach(nh => {
+                    nh.layer = L.geoJson(nh.geom, {
+                        style: {
+                            color: nh.color,
+                            weight: 3,
+                            fillColor: nh.color,
+                            fillOpacity: 0.04,
+                            dashArray: '6, 4'
+                        }
+                    }).addTo(map);
+
+                    nh.layer.on('click', function(e) {
+                        if(activeMode !== 'map') return;
+                        openEditFormPopup(e.latlng, null, dist.district, nh.name);
+                    });
+
+                    // Mahalle Merkezi Etiketi
+                    const center = getGeomCentroid(nh.geom);
+                    nh.labelMarker = L.marker(center, {
+                        icon: L.divIcon({
+                            className: 'nh-label',
+                            html: `<span class="nh-label-text" style="color:${nh.color}">${nh.name}</span>`,
+                            iconAnchor: [0, 0]
+                        }),
+                        interactive: false,
+                        zIndexOffset: -100
+                    }).addTo(map);
+                });
+            });
+        }
+
+        // Projeleri Haritaya İşleme
+        function refreshMapMarkers() {
+            activeMarkersGroup.clearLayers();
+            customMarkers = [];
+
+            savedProjects.forEach(p => {
+                const marker = L.marker([p.lat, p.lng]);
+                marker.bindTooltip(`<span>${p.name}</span>`, { permanent: true, direction: 'top', offset: [0, -10], className: 'map-tooltip' });
+                
+                marker.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e); // harita zeminine tıklanmasını (yeni kayıt açmasını) engelle
+                    showReadPopup(p, marker);
+                });
+
+                const nhMeta = database.find(d => d.district === p.dist)?.neighborhoods.find(n => n.name === p.nh);
+                
+                activeMarkersGroup.addLayer(marker);
+                customMarkers.push({ project: p, marker: marker, neighborhood: nhMeta });
+            });
+        }
+
+        function getRoomRowHtml(rType = '1+1', rCount = '1') {
+            return `
+                <div class="room-row" style="display:flex; justify-content:space-between; gap:5px; margin-bottom:8px;">
+                    <select class="f-input room-type-sel" style="margin-bottom:0;">
+                        <option value="1+1" ${rType === '1+1' ? 'selected' : ''}>1+1</option>
+                        <option value="2+1" ${rType === '2+1' ? 'selected' : ''}>2+1</option>
+                        <option value="3+1" ${rType === '3+1' ? 'selected' : ''}>3+1</option>
+                        <option value="4+1" ${rType === '4+1' ? 'selected' : ''}>4+1</option>
+                    </select>
+                    <select class="f-input room-count-sel" style="margin-bottom:0;">
+                        ${Array.from({length:30}, (_,i)=>i+1).map(i => `<option value="${i}" ${rCount == i ? 'selected' : ''}>${i} Adet</option>`).join('')}
+                    </select>
+                    <button type="button" onclick="const row = this.parentElement; setTimeout(() => row.remove(), 10);" style="background:#E53E3E; color:white; border:none; padding:0 10px; border-radius:4px; font-weight:bold; cursor:pointer;" title="Bu odayı sil">X</button>
+                </div>
+            `;
+        }
+
+        window.addRoomRow = function() {
+            const container = document.getElementById('rooms_container');
+            if(container) container.insertAdjacentHTML('beforeend', getRoomRowHtml());
+        };
+
+        // POPUP: Ekleme & Düzenleme Formu
+        function openEditFormPopup(latlng, existingId, dist, nh) {
+            let p = { id: Date.now(), lat: latlng.lat, lng: latlng.lng, dist: dist, nh: nh, name: '', year: '', endYear: '', rooms: '', floors: '', note: '', adaParsel: '', photo: '' };
+            if(existingId) p = Object.assign({}, savedProjects.find(sp => sp.id === existingId)); // kopyasını al
+
+            let roomRows = [];
+            if (p.rooms) {
+                const parts = p.rooms.split(',');
+                parts.forEach(part => {
+                    let rType = '1+1';
+                    let rCount = '1';
+                    let match = part.match(/(\d\+\d)/);if(match) rType = match[1];
+                    let numMatch = part.match(/-\s*(\d+)/);if(numMatch) rCount = numMatch[1];
+                    roomRows.push({ rType, rCount });
+                });
+            }
+            if(roomRows.length === 0) roomRows.push({ rType: '1+1', rCount: '1' });
+            
+            let roomsHtml = roomRows.map(r => getRoomRowHtml(r.rType, r.rCount)).join('');
+
+            const formHtml = `
+                <div style="font-size:0.9rem; min-width:240px; padding:5px;">
+                    <h4 style="margin-bottom:12px; color:var(--primary); font-size:1.1rem;">${existingId ? '✏️ Kaydı Düzenle' : '📍 Yeni Kayıt Ekle'}<br><span style="font-size:0.8rem; color:#718096; font-weight:normal;">${dist} - ${nh}</span></h4>
+                    <input type="text" id="f_name" class="f-input" placeholder="Proje / Bina Adı" value="${p.name}">
+                    <input type="text" id="f_adaParsel" class="f-input" placeholder="Ada / Parsel" value="${p.adaParsel || ''}">
+                    <div style="display:flex; justify-content:space-between; gap:5px;">
+                        <input type="text" id="f_year" class="f-input" placeholder="Yapım Yılı" value="${p.year}">
+                        <input type="text" id="f_endYear" class="f-input" placeholder="Bitiş Yılı" value="${p.endYear}">
+                    </div>
+                    <div id="rooms_container">
+                        ${roomsHtml}
+                    </div>
+                    <button type="button" onclick="addRoomRow()" style="width:100%; background:#718096; color:white; border:none; padding:4px; border-radius:4px; font-weight:bold; cursor:pointer; margin-bottom:8px;">+ YENİ ODA TİPİ EKLE</button>
+                    <input type="text" id="f_floors" class="f-input" placeholder="Kat Sayısı (Örn: 5 Katlı)" value="${p.floors}">
+                    <textarea id="f_note" class="f-input" placeholder="Notlarınız..." style="min-height:50px; resize:vertical;">${p.note}</textarea>
+                    
+                    <input type="file" id="f_photo" accept="image/*" style="width:100%; margin-bottom:8px; font-size:12px; border: 1px solid #CBD5E0; border-radius: 4px; padding: 4px;" onchange="handlePhotoUpload(event)">
+                    <div id="photo_preview_container" style="display: ${p.photo ? 'block' : 'none'}; margin-bottom: 8px;">
+                        <button type="button" onclick="viewPhoto()" style="width:100%; background:#4A5568; color:white; border:none; padding:6px; border-radius:4px; font-weight:bold; cursor:pointer;">📷 Fotoğrafı Gör</button>
+                    </div>
+
+                    <button onclick="saveProjectItem()" style="width:100%; background:var(--accent); color:white; border:none; padding:10px; border-radius:6px; font-weight:bold; cursor:pointer; margin-top:5px;" >💾 KAYDET</button>
+                </div>
+            `;
+            
+            // Bağlamı güvenli şekilde global değişkende sakla
+            _editCtx = { id: p.id, lat: p.lat, lng: p.lng, dist: dist, nh: nh, photo: p.photo || '' };
+            L.popup({ maxHeight: window.innerHeight - 120 }).setLatLng(latlng).setContent(formHtml).openOn(map);
+        }
+
+        function handlePhotoUpload(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 800;
+                    const MAX_HEIGHT = 800;
+                    let width = img.width;
+                    let height = img.height;
+                    if(width > height) {
+                        if(width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                    } else {
+                        if(height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    _editCtx.photo = canvas.toDataURL('image/jpeg', 0.7);
+                    document.getElementById('photo_preview_container').style.display = 'block';
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function viewPhoto() {
+            if(!_editCtx.photo) return;
+            const w = window.open("");
+            w.document.write(`<img src="${_editCtx.photo}" style="max-width:100%; height:auto;">`);
+        }
+
+        function viewPhotoReadPopup() {
+            if(!_readCtx.photo) return;
+            const w = window.open("");
+            w.document.write(`<img src="${_readCtx.photo}" style="max-width:100%; height:auto;">`);
+        }
+
+        function saveProjectItem() {
+            const { id, lat, lng, dist, nh } = _editCtx;
+            const name = document.getElementById('f_name').value.trim();
+            if(!name) { alert("Lütfen en azından bir Proje/Bina Adı giriniz!"); return; }
+
+            let roomTypes = document.querySelectorAll('.room-type-sel');
+            let roomCounts = document.querySelectorAll('.room-count-sel');
+            let roomData = [];
+            for(let i=0; i<roomTypes.length; i++) {
+                roomData.push(roomTypes[i].value + ' - ' + roomCounts[i].value + ' Adet');
+            }
+            const roomsStr = roomData.join(', ');
+
+            const newProj = {
+                id: id, lat: lat, lng: lng, dist: dist, nh: nh,
+                name: name,
+                year: document.getElementById('f_year').value,
+                endYear: document.getElementById('f_endYear').value,
+                rooms: roomsStr,
+                floors: document.getElementById('f_floors').value,
+                note: document.getElementById('f_note').value,
+                adaParsel: document.getElementById('f_adaParsel').value.trim(),
+                photo: _editCtx.photo || ''
+            };
+
+            const idx = savedProjects.findIndex(sp => sp.id === id);
+            if(idx > -1) { savedProjects[idx] = newProj; } 
+            else { savedProjects.push(newProj); }
+
+            localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+            
+            map.closePopup();
+            refreshMapMarkers();
+            if(activeMode === 'table') renderTable();
+        }
+
+        // POPUP: Okuma Ekranı (Üzerine tıklayınca)
+        function showReadPopup(p, marker) {
+            const googleRoute = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+            const yandexRoute = `yandexmaps://build_route_on_map?lat_to=${p.lat}&lon_to=${p.lng}`;
+            const appleRoute = `maps://maps.apple.com/?daddr=${p.lat},${p.lng}`;
+
+            const content = `
+                <div class="popup-card">
+                    <div class="popup-title">${p.name}</div>
+                    <b>Yapım/Bitiş:</b> ${p.year || '-'} / ${p.endYear || '-'}<br>
+                    <b>Ada/Parsel:</b> ${p.adaParsel || '-'}<br>
+                    <b>Oda / Kat:</b> ${p.rooms || '-'} | ${p.floors || '-'} Katlı<br>
+                    <b>Not:</b> ${p.note || '-'}<br>
+                    ${p.photo ? `<button onclick="viewPhotoReadPopup()" style="width:100%; background:#4A5568; color:white; border:none; padding:6px; border-radius:4px; font-weight:bold; cursor:pointer; margin-top:8px; margin-bottom:8px;">📷 Fotoğrafı Gör</button>` : ''}
+                    <div class="route-links">
+                        <a href="${googleRoute}" target="_blank" class="route-btn bg-google">Google</a>
+                        <a href="${yandexRoute}" class="route-btn bg-yandex">Yandex</a>
+                        <a href="${appleRoute}" class="route-btn bg-apple">Apple</a>
+                    </div>
+                    <hr style="margin:12px 0; border:0; border-top:1px solid #E2E8F0;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <button onclick="editCurrentProject()" style="background:var(--primary); color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">⚙️ Düzenle</button>
+                        <button onclick="deleteProject(${p.id})" style="background:#E53E3E; color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">🗑️ Sil</button>
+                    </div>
+                </div>
+            `;
+            _readCtx = { id: p.id, lat: p.lat, lng: p.lng, dist: p.dist, nh: p.nh, photo: p.photo || '' };
+            L.popup({ maxHeight: window.innerHeight - 120 }).setLatLng([p.lat, p.lng]).setContent(content).openOn(map);
+        }
+
+
+        function editCurrentProject() {
+            const { id, lat, lng, dist, nh } = _readCtx;
+            openEditFormPopup({ lat, lng }, id, dist, nh);
+        }
+
+        function deleteProject(id) {
+            if(confirm("Silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
+                savedProjects = savedProjects.filter(sp => sp.id !== id);
+                localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+                map.closePopup();
+                refreshMapMarkers();
+                if(activeMode === 'table') renderTable();
+            }
+        }
+
+        // Harita - Tablo Modu Geçişi
+        function switchView() {
+            const mapView = document.getElementById('map-view');
+            const tableView = document.getElementById('table-view');
+            const toggleBtn = document.getElementById('toggle-btn');
+            const locBtn = document.getElementById('loc-btn');
+            const searchInput = document.getElementById('searchInput');
+
+            if (activeMode === 'map') {
+                mapView.style.display = 'none';
+                tableView.style.display = 'block';
+                locBtn.style.display = 'none';
+                toggleBtn.innerHTML = '🗺️ Harita Görünümü';
+                activeMode = 'table';
+                renderTable(searchInput.value.toLowerCase().trim());
+            } else {
+                mapView.style.display = 'block';
+                tableView.style.display = 'none';
+                locBtn.style.display = 'flex';
+                toggleBtn.innerHTML = '📋 Tablo Görünümü';
+                activeMode = 'map';
+                setTimeout(() => { map.invalidateSize(); }, 100);
+            }
+        }
+
+        // Tabloyu Tüm Mahalleleri İçerecek Şekilde Doldur
+        function renderTable(filterQuery = '') {
+            const container = document.getElementById('treeContainer');
+            container.innerHTML = '';
+
+            let hasAnyContent = false;
+
+            database.forEach(dist => {
+                // İlçedeki toplam kayıtlı proje sayısını hesapla
+                const distTotalCount = savedProjects.filter(sp =>
+                    sp.dist === dist.district &&
+                    (filterQuery === '' || sp.name.toLowerCase().includes(filterQuery) || (sp.rooms||'').toLowerCase().includes(filterQuery) || (sp.note||'').toLowerCase().includes(filterQuery))
+                ).length;
+
+                const distBadge = distTotalCount > 0
+                    ? `<span style="background:var(--accent);color:#fff;font-size:0.7rem;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:8px;">${distTotalCount} kayıt</span>`
+                    : '';
+
+                const distCard = document.createElement('div');
+                distCard.className = 'district-card';
+                
+                let html = `<div class="district-header" onclick="toggleElement(this.nextElementSibling)"><span>📁 ${dist.district}${distBadge}</span> <span>▼</span></div><div class="neighborhood-box" style="display:block;">`;
+
+                dist.neighborhoods.forEach(nh => {
+                    const nhProjects = savedProjects.filter(sp => sp.dist === dist.district && sp.nh === nh.name);
+                    const nhMatchCount = nhProjects.filter(p =>
+                        filterQuery === '' || p.name.toLowerCase().includes(filterQuery) ||
+                        (p.rooms||'').toLowerCase().includes(filterQuery) ||
+                        (p.note||'').toLowerCase().includes(filterQuery)
+                    ).length;
+
+                    const nhBadge = nhMatchCount > 0
+                        ? `<span style="background:${nh.color || '#805AD5'};color:#fff;font-size:0.65rem;font-weight:800;padding:1px 7px;border-radius:20px;margin-left:6px;">${nhMatchCount}</span>`
+                        : '';
+
+                    let nhHtml = `<div class="neighborhood-header" onclick="toggleElement(this.nextElementSibling)"><span>📍 ${nh.name}${nhBadge}</span> <span>▼</span></div><div class="projects-box" style="display:block;">`;
+
+                    let projCount = 0;
+                    nhProjects.forEach(p => {
+                        const matchesSearch = filterQuery === '' || p.name.toLowerCase().includes(filterQuery) || p.rooms.toLowerCase().includes(filterQuery) || p.note.toLowerCase().includes(filterQuery);
+
+                        if (matchesSearch) {
+                            hasAnyContent = true;
+                            projCount++;
+                            nhHtml += `
+                                <div class="project-item" onclick="selectFromTable(${p.lat}, ${p.lng}, ${p.id})">
+                                    <div class="project-title">${p.name}</div>
+                                    <div class="project-details">
+                                        <b>Yapım:</b> ${p.year || '-'} - ${p.endYear || '-'} | <b>Kat:</b> ${p.floors || '-'}<br>
+                                        <b>Seçenekler:</b> ${p.rooms || '-'}<br>
+                                        <b>Not:</b> ${p.note || '-'}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+
+                    if(projCount === 0 && filterQuery === '') {
+                        nhHtml += `<div style="padding:10px; font-size:0.85rem; color:#A0AEC0;">Henüz kayıtlı proje yok.</div>`;
+                    }
+                    
+                    html += nhHtml + `</div>`;
+                });
+
+                html += `</div>`;
+                distCard.innerHTML = html;
+                container.appendChild(distCard);
+            });
+
+            if (filterQuery !== '' && !hasAnyContent) {
+                container.innerHTML = '<div style="color:#718096; padding:20px; text-align:center; font-weight:bold;">Aramanızla eşleşen hiçbir kayıt bulunamadı.</div>';
+            }
+        }
+
+        function toggleElement(el) {
+            if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function selectFromTable(lat, lng, id) {
+            switchView();
+            map.setView([lat, lng], 17);
+            const item = customMarkers.find(m => m.project.id === id);
+            if (item) {
+                setTimeout(() => showReadPopup(item.project, item.marker), 300);
+            }
+        }
+
+        function executeSearch(val) {
+            const q = val.toLowerCase().trim();
+
+            if (searchHighlight) {
+                map.removeLayer(searchHighlight);
+                searchHighlight = null;
+            }
+
+            if (activeMode === 'table') {
+                renderTable(q);
+                return;
+            }
+
+            if (!q) return;
+
+            let matches = customMarkers.filter(m => m.project.name.toLowerCase().includes(q) || m.project.note.toLowerCase().includes(q));
+            if (matches.length > 0) {
+                const match = matches[0];
+                map.setView([match.project.lat, match.project.lng], 16);
+                
+                searchHighlight = L.circle([match.project.lat, match.project.lng], {
+                    color: '#1A202C',
+                    fillColor: match.neighborhood?.color || '#D69E2E',
+                    fillOpacity: 0.6,
+                    radius: 80
+                }).addTo(map);
+
+                showReadPopup(match.project, match.marker);
+            }
+        }
+
+        function locateUser() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    map.setMaxBounds(null);
+                    map.setView([lat, lng], 15);
+                    L.circleMarker([lat, lng], { radius: 10, color: '#3182CE', fillColor: '#3182CE', fillOpacity: 0.9 }).addTo(map)
+                        .bindPopup("Şu an buradasınız").openPopup();
+                }, (error) => { 
+                    alert("Konum alınamadı: " + error.message); 
+                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+            } else {
+                alert("Tarayıcınız konum özelliğini desteklemiyor.");
+            }
+        }
+
+        function resetView() {
+            map.setMaxBounds([[36.75, 30.50], [37.00, 30.95]]);
+            map.setView([36.90, 30.70], 11);
+            document.getElementById('searchInput').value = '';
+            if (searchHighlight) { map.removeLayer(searchHighlight); searchHighlight = null; }
+            if (activeMode === 'table') renderTable();
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
