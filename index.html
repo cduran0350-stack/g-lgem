@@ -586,11 +586,24 @@
             let hasAnyContent = false;
 
             database.forEach(dist => {
-                // İlçedeki toplam kayıtlı proje sayısını hesapla
-                const distTotalCount = savedProjects.filter(sp =>
-                    sp.dist === dist.district &&
-                    (filterQuery === '' || sp.name.toLowerCase().includes(filterQuery) || (sp.rooms||'').toLowerCase().includes(filterQuery) || (sp.note||'').toLowerCase().includes(filterQuery))
-                ).length;
+                // Türkçe karakterleri normalize et (ç→c, ş→s, ı→i vb.)
+                // Bu sayede "caybashy" yazılsa bile "Çaybaşı" bulunur
+                const nhNorm = s => (s||'').toLowerCase().replace(/ğ/g,'g').replace(/ü/g,'u').replace(/ş/g,'s').replace(/ı/g,'i').replace(/ö/g,'o').replace(/ç/g,'c');
+                const fqNorm = nhNorm(filterQuery);
+
+                // İlçedeki toplam kayıtlı proje + mahalle adı eşleşmesini hesapla
+                const distTotalCount = dist.neighborhoods.reduce((sum, nh) => {
+                    const nhNameMatch = filterQuery !== '' && nhNorm(nh.name).includes(fqNorm);
+                    const nhProj = savedProjects.filter(sp => sp.dist === dist.district && sp.nh === nh.name);
+                    const matching = nhProj.filter(p =>
+                        nhNameMatch ||
+                        filterQuery === '' ||
+                        nhNorm(p.name).includes(fqNorm) ||
+                        nhNorm(p.rooms||'').includes(fqNorm) ||
+                        nhNorm(p.note||'').includes(fqNorm)
+                    );
+                    return sum + matching.length;
+                }, 0);
 
                 const distBadge = distTotalCount > 0
                     ? `<span style="background:var(--accent);color:#fff;font-size:0.7rem;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:8px;">${distTotalCount} kayıt</span>`
@@ -602,12 +615,21 @@
                 let html = `<div class="district-header" onclick="toggleElement(this.nextElementSibling)"><span>📁 ${dist.district}${distBadge}</span> <span>▼</span></div><div class="neighborhood-box" style="display:block;">`;
 
                 dist.neighborhoods.forEach(nh => {
+                    const nhNameMatch = filterQuery !== '' && nhNorm(nh.name).includes(fqNorm);
                     const nhProjects = savedProjects.filter(sp => sp.dist === dist.district && sp.nh === nh.name);
-                    const nhMatchCount = nhProjects.filter(p =>
-                        filterQuery === '' || p.name.toLowerCase().includes(filterQuery) ||
-                        (p.rooms||'').toLowerCase().includes(filterQuery) ||
-                        (p.note||'').toLowerCase().includes(filterQuery)
-                    ).length;
+
+                    // Mahalle adı eşleşiyorsa tüm projeleri say, yoksa içerik ara
+                    const nhMatchCount = nhNameMatch
+                        ? nhProjects.length
+                        : nhProjects.filter(p =>
+                            filterQuery === '' ||
+                            nhNorm(p.name).includes(fqNorm) ||
+                            nhNorm(p.rooms||'').includes(fqNorm) ||
+                            nhNorm(p.note||'').includes(fqNorm)
+                        ).length;
+
+                    // Filtre varsa ve bu mahalle + projeleri eşleşmiyorsa gizle
+                    if (filterQuery !== '' && !nhNameMatch && nhMatchCount === 0) return;
 
                     const nhBadge = nhMatchCount > 0
                         ? `<span style="background:${nh.color || '#805AD5'};color:#fff;font-size:0.65rem;font-weight:800;padding:1px 7px;border-radius:20px;margin-left:6px;">${nhMatchCount}</span>`
@@ -617,7 +639,12 @@
 
                     let projCount = 0;
                     nhProjects.forEach(p => {
-                        const matchesSearch = filterQuery === '' || p.name.toLowerCase().includes(filterQuery) || p.rooms.toLowerCase().includes(filterQuery) || p.note.toLowerCase().includes(filterQuery);
+                        // Mahalle adı eşleşiyorsa tüm projeleri göster
+                        const matchesSearch = nhNameMatch ||
+                            filterQuery === '' ||
+                            nhNorm(p.name).includes(fqNorm) ||
+                            nhNorm(p.rooms||'').includes(fqNorm) ||
+                            nhNorm(p.note||'').includes(fqNorm);
 
                         if (matchesSearch) {
                             hasAnyContent = true;
@@ -635,8 +662,9 @@
                         }
                     });
 
-                    if(projCount === 0 && filterQuery === '') {
-                        nhHtml += `<div style="padding:10px; font-size:0.85rem; color:#A0AEC0;">Henüz kayıtlı proje yok.</div>`;
+                    if (projCount === 0) {
+                        nhHtml += `<div style="padding:10px; font-size:0.85rem; color:#A0AEC0;">${nhNameMatch ? 'Bu mahallede henüz kayıtlı proje yok.' : 'Henüz kayıtlı proje yok.'}</div>`;
+                        if (nhNameMatch) hasAnyContent = true;
                     }
                     
                     html += nhHtml + `</div>`;
@@ -665,11 +693,23 @@
             }
         }
 
+        // Türkçe karakter normalize (arama için)
+        function nhNormSearch(s) {
+            return (s||'').toLowerCase()
+                .replace(/ğ/g,'g').replace(/ü/g,'u').replace(/ş/g,'s')
+                .replace(/ı/g,'i').replace(/ö/g,'o').replace(/ç/g,'c');
+        }
+
         function executeSearch(val) {
             const q = val.toLowerCase().trim();
+            const qNorm = nhNormSearch(q);
 
             if (searchHighlight) {
-                map.removeLayer(searchHighlight);
+                if (Array.isArray(searchHighlight)) {
+                    searchHighlight.forEach(l => map.removeLayer(l));
+                } else {
+                    map.removeLayer(searchHighlight);
+                }
                 searchHighlight = null;
             }
 
@@ -680,18 +720,41 @@
 
             if (!q) return;
 
-            let matches = customMarkers.filter(m => m.project.name.toLowerCase().includes(q) || m.project.note.toLowerCase().includes(q));
+            // 1. Önce mahalle adında ara
+            let foundNh = null;
+            database.forEach(dist => {
+                dist.neighborhoods.forEach(nh => {
+                    if (!foundNh && nhNormSearch(nh.name).includes(qNorm)) {
+                        foundNh = nh;
+                    }
+                });
+            });
+
+            if (foundNh) {
+                // Mahallenin ortasına git, sınırını vurgula
+                const center = getGeomCentroid(foundNh.geom);
+                map.setView(center, 14);
+                searchHighlight = L.geoJson(foundNh.geom, {
+                    style: { color: foundNh.color, weight: 5, fillColor: foundNh.color, fillOpacity: 0.18, dashArray: null }
+                }).addTo(map);
+                return;
+            }
+
+            // 2. Proje adı / notunda ara
+            let matches = customMarkers.filter(m =>
+                nhNormSearch(m.project.name).includes(qNorm) ||
+                nhNormSearch(m.project.note||'').includes(qNorm) ||
+                nhNormSearch(m.project.nh||'').includes(qNorm)
+            );
             if (matches.length > 0) {
                 const match = matches[0];
                 map.setView([match.project.lat, match.project.lng], 16);
-                
                 searchHighlight = L.circle([match.project.lat, match.project.lng], {
                     color: '#1A202C',
                     fillColor: match.neighborhood?.color || '#D69E2E',
                     fillOpacity: 0.6,
                     radius: 80
                 }).addTo(map);
-
                 showReadPopup(match.project, match.marker);
             }
         }
