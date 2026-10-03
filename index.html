@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GÖLGEM - Emlak & Harita Bilgi Sistemi</title>
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1A202C">
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -176,17 +182,54 @@
     </div>
 
     <script>
-        // Veriler 'mahalle_data.js' dosyasından otomatik yükleniyor.
+        // === FIREBASE AYARLARINIZI BURAYA YAPIŞTIRIN ===
+        // Firebase Console'dan (Proje Ayarları) aldığınız objeyi aşağıdaki gibi doldurun:
+        const firebaseConfig = {
+            /* 
+            apiKey: "...", 
+            authDomain: "...",
+            databaseURL: "...", 
+            projectId: "...", ...
+            */
+        };
+        
+        // PWA Service Worker Kaydı
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
 
         let map, activeMode = 'map';
         let customMarkers = [];
         let searchHighlight = null;
         let activeMarkersGroup = L.layerGroup();
-        let _editCtx = {}; // Aktif form bilgisini tutar (dist, nh, id, lat, lng)
-        let _readCtx = {};  // Okuma popup'u için aktif proje bilgisi
+        let _editCtx = {}; 
+        let _readCtx = {};  
 
-        // Local Storage'dan kaydedilen projeleri çek, yoksa boş dizi
-        let savedProjects = JSON.parse(localStorage.getItem('golgem_projects')) || [];
+        let savedProjects = [];
+        let isFirebaseActive = Object.keys(firebaseConfig).length > 0;
+
+        if (isFirebaseActive) {
+            firebase.initializeApp(firebaseConfig);
+            const dbRef = firebase.database().ref('golgem_projects');
+            dbRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                savedProjects = data ? (Array.isArray(data) ? data : Object.values(data)) : [];
+                if (map) { // Harita yüklüyse yenile
+                    refreshMapMarkers();
+                    if(activeMode === 'table') renderTable();
+                }
+            });
+        } else {
+            savedProjects = JSON.parse(localStorage.getItem('golgem_projects')) || [];
+        }
+
+        function saveToStorage() {
+            if (isFirebaseActive) {
+                firebase.database().ref('golgem_projects').set(savedProjects);
+            } else {
+                localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+            }
+        }
 
         function initMap() {
             // ──── VERİ MIGRATION (isim düzeltme) ────────────────────────────────
@@ -216,7 +259,7 @@
                     if (best) { p.nh = best; needsSave = true; }
                 }
             });
-            if (needsSave) localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+            if (needsSave) saveToStorage();
             // ────────────────────────────────────────────────────────────────────
 
             const antalyaBounds = [[36.75, 30.50], [37.00, 30.95]];
@@ -456,7 +499,7 @@
             if(idx > -1) { savedProjects[idx] = newProj; } 
             else { savedProjects.push(newProj); }
 
-            localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+            saveToStorage();
             
             map.closePopup();
             refreshMapMarkers();
@@ -502,7 +545,7 @@
         function deleteProject(id) {
             if(confirm("Silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
                 savedProjects = savedProjects.filter(sp => sp.id !== id);
-                localStorage.setItem('golgem_projects', JSON.stringify(savedProjects));
+                saveToStorage();
                 map.closePopup();
                 refreshMapMarkers();
                 if(activeMode === 'table') renderTable();
